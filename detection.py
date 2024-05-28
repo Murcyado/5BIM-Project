@@ -106,7 +106,7 @@ async def display_camera_streams(camera_url):
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Libérer la capture vidéo et fermer ses fenêtres
+    # Libérer la capture vidéo et fermer la caméra
     cap.release()
     cv2.destroyAllWindows()
 
