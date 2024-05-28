@@ -2,18 +2,24 @@ import cv2
 import torch
 import os
 
+#Détéction et classification d'objets 
 class Detect_Objet:
     def __init__(self, model_name='yolov5s'):
         #Charger modèle YOLOv5
         self.model = torch.hub.load('ultralytics/yolov5', model_name, pretrained=True)
         self.classes = self.model.names
+        
+        #Dossier ou sont rangées les images 
         self.output_dir = "objets_detectes"
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
+        
+        # Spécifier les classes d'objets à détecter
         self.target_classes = ['laptop', 'mouse']
 
-    
+
     def objets_detectes(self,frame):
+        #Détection d'objets sur l'image
         resultat = self.model(frame)
         detections = []
         for detect in resultat.xyxy[0]:
@@ -33,6 +39,7 @@ class Detect_Objet:
         if obj_img.size > 0:
             cv2.imwrite(os.path.join(label_dir, f"{label}_{frame_count}.jpg"), obj_img)
 
+# Stream webcam 
 class StreamWebcam: 
     def __init__(self, camera_id=0):
         self.camera_id = camera_id
@@ -50,10 +57,12 @@ class StreamWebcam:
             if not ret: 
                 print("Erreur de capture vidéo")
                 break
-
+            
+            # Détecter les objets sur la webcam
             detections = self.detector.objets_detectes(frame)
             counts = {}
 
+            # CRéation de la boite de détection d'objets
             for label, bbox, conf in detections:
                 counts[label] = counts.get(label, 0) + 1
                 color = (0, 255, 0) if label == "mouse" else (255, 0, 0)
@@ -62,6 +71,7 @@ class StreamWebcam:
                 cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
                 self.detector.sauvegarde_detection(frame, label, bbox, self.frame_count)
 
+            # Affichage du nombre d'objets détectés
             y_offset = 30
             for label, count in counts.items():
                 cv2.putText(frame, f"{label}: {count}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
