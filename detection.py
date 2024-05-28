@@ -1,127 +1,79 @@
 import cv2
-import numpy as np
-from dotenv import load_dotenv
-import os
-import aiohttp
-import asyncio
 import torch
+import os
 
-load_dotenv()
+class ObjectDetection:
+    def __init__(self, model_name='yolov5s'):
+        # Charger le modèle YOLOv5
+        self.model = torch.hub.load('ultralytics/yolov5', model_name, pretrained=True)
+        self.classes = self.model.names
+        self.target_classes = ["laptop", "mouse"]  # Classes cibles: ordinateurs et souris
+        self.output_dir = "detected_objects"
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
-# Charger le modèle YOLOv5
-model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-
-# Définir les classes de YOLOv5
-CLASSES = model.names
-
-transport_classes = {"aeroplane", "bicycle", "boat", "bus", "car", "motorbike", "train"}
-living_classes = {"bird", "cat", "cow", "dog", "horse", "person", "sheep"}
-object_classes = {"bottle", "chair", "diningtable", "pottedplant", "sofa", "tvmonitor"}
-
-# Créer un dossier pour stocker les images capturées
-output_dir = "detected_objects"
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-async def fetch_camera_data():
-    api_key = os.getenv('API_KEY')
-    headers = {
-        "Authorization": f"Bearer {api_key}"
-    }
-    url = "https://api.netatmo.com/api/gethomesdata"
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                return data
-            else:
-                print(f"Erreur: {response.status}")
-                print(await response.text())
-                return None
-
-async def display_camera_streams(camera_url):
-
-    # Initialiser la capture vidéo pour la caméra réseau
-    cap = cv2.VideoCapture(camera_url + "/live/files/low/index.m3u8")
-
-    if not cap.isOpened():
-        print("Erreur d'ouverture de la caméra réseau")
-        return
-
-    frame_count = 0
-    while True:
-        # Lire une image de la caméra réseau
-        ret, frame = cap.read()
-
-        if not ret:
-            print("Erreur dans la capture vidéo")
-            break
-
-        # Utiliser YOLOv5 pour la détection
-        results = model(frame)
-
-        # Compter les occurrences des objets détectés
-        counts = {}
+    def detect_objects(self, frame):
+        results = self.model(frame)
+        detections = []
         for det in results.xyxy[0]:
             x1, y1, x2, y2, conf, cls = det
-            label = CLASSES[int(cls)]
-            counts[label] = counts.get(label, 0) + 1
+            label = self.classes[int(cls)]
+            if label in self.target_classes:
+                detections.append((label, (int(x1), int(y1), int(x2), int(y2)), conf))
+        return detections
 
-            if label in transport_classes:
-                color = (255, 0, 0)  # bleu
-            elif label in living_classes:
-                color = (0, 255, 0)  # vert
-            elif label in object_classes:
-                color = (0, 255, 255)  # jaune
-            else:
-                color = (255, 255, 255)  # blanc par défaut
-            
-            # Dessiner les boîtes et les étiquettes
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            cv2.putText(frame, f"{label} {conf:.2f}", (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+    def save_detection(self, frame, label, bbox, frame_count):
+        label_dir = os.path.join(self.output_dir, label)
+        if not os.path.exists(label_dir):
+            os.makedirs(label_dir)
+        x1, y1, x2, y2 = bbox
+        obj_img = frame[y1:y2, x1:x2]
+        if obj_img.size > 0:
+            cv2.imwrite(os.path.join(label_dir, f"{label}_{frame_count}.jpg"), obj_img)
 
-            # Créer un dossier pour chaque label s'il n'existe pas
-            label_dir = os.path.join(output_dir, label)
-            if not os.path.exists(label_dir):
-                os.makedirs(label_dir)
+class CameraStream:
+    def __init__(self, camera_id=0):
+        self.camera_id = camera_id
+        self.cap = cv2.VideoCapture(camera_id)
+        self.detector = ObjectDetection()
+        self.frame_count = 0
 
-            # Enregistrer l'image de l'objet détecté
-            obj_img = frame[int(y1):int(y2), int(x1):int(x2)]
-            if obj_img.size > 0:  # Vérifier que l'image n'est pas vide
-                cv2.imwrite(os.path.join(label_dir, f"{label}_{frame_count}.jpg"), obj_img)
+    def process_stream(self):
+        if not self.cap.isOpened():
+            print(f"Erreur d'ouverture de la caméra {self.camera_id}")
+            return
 
-        # Afficher les occurrences des objets détectés
-        y_offset = 30
-        for label, count in counts.items():
-            cv2.putText(frame, f"{label}: {count}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-            y_offset += 30
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                print("Erreur dans la capture vidéo")
+                break
 
-        # Afficher l'image avec les détections
-        cv2.imshow('Camera Stream - YOLOv5 Object Detection', frame)
+            detections = self.detector.detect_objects(frame)
+            counts = {}
 
-        frame_count += 1
-        
-        # Sortir de la boucle, si la touche 'q' est pressée
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            for label, bbox, conf in detections:
+                counts[label] = counts.get(label, 0) + 1
+                color = (0, 255, 0) if label == "mouse" else (255, 0, 0)
+                x1, y1, x2, y2 = bbox
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                self.detector.save_detection(frame, label, bbox, self.frame_count)
 
-    # Libérer la capture vidéo et fermer la caméra
-    cap.release()
-    cv2.destroyAllWindows()
+            y_offset = 30
+            for label, count in counts.items():
+                cv2.putText(frame, f"{label}: {count}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                y_offset += 30
 
-async def main():
-    data = await fetch_camera_data()
-    if data:
-        homes = data.get('body', {}).get('homes', [])
-        tasks = []
-        for home in homes:
-            for camera in home.get('cameras', []):
-                print(f"Nom: {camera.get('name')}")
-                print(f"VPN URL: {camera.get('vpn_url')}")
-                print('---')
-                tasks.append(display_camera_streams(camera.get('vpn_url')))
-        await asyncio.gather(*tasks)
+            cv2.imshow(f'Camera Stream {self.camera_id} - YOLOv5 Object Detection', frame)
+            self.frame_count += 1
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    stream = CameraStream(0)  # Utiliser la webcam de l'ordinateur
+    stream.process_stream()
