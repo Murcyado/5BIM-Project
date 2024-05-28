@@ -29,7 +29,7 @@ class Detect_Objet:
                 detections.append((label, (int(x1), int(y1), int(x2), int(y2)), conf))
         return detections
     
-    # Sauvegarde des images dans le dossier "objets_detectes"
+    # Sauvegarde des images dans le dossier "objets_detectes" en fonction de l'objet détecté
     def sauvegarde_detection(self, frame, label, bbox, frame_count):
         label_dir = os.path.join(self.output_dir, label)
         if not os.path.exists(label_dir):
